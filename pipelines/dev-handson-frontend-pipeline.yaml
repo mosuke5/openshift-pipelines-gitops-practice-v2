@@ -1,0 +1,163 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: dev-handson-frontend-pipeline
+  namespace: dev-handson
+  labels:
+    app.kubernetes.io/part-of: dev-handson
+spec:
+  params:
+    - name: repo-url
+      type: string
+      description: ソースリポジトリの HTTPS URL
+    - name: revision
+      type: string
+      description: Git リビジョン (コミットハッシュ)
+    - name: manifest-repo-url
+      type: string
+      description: マニフェストリポジトリの HTTPS URL
+    - name: image-registry
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000"
+    - name: image-namespace
+      type: string
+    - name: app-name
+      type: string
+  workspaces:
+    - name: shared-workspace
+    - name: basic-auth
+  tasks:
+    # ---------------------------------------------------------
+    # 1. ソースコード取得
+    # ---------------------------------------------------------
+    - name: fetch-source
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: openshift-pipelines
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+          subPath: source
+        - name: basic-auth
+          workspace: basic-auth
+      params:
+        - name: URL
+          value: $(params.repo-url)
+        - name: REVISION
+          value: $(params.revision)
+
+    # ---------------------------------------------------------
+    # 2. ユニットテスト (npm)
+    # ---------------------------------------------------------
+    - name: unit-test
+      runAfter:
+        - fetch-source
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: source
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: npm-test
+            image: registry.access.redhat.com/ubi8/nodejs-18:latest
+            workingDir: $(workspaces.source.path)
+            script: |
+              npm ci
+              npm test
+
+    # ---------------------------------------------------------
+    # 3. コンテナイメージビルド (S2I Node.js)
+    # ---------------------------------------------------------
+    - name: build-image
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: s2i-nodejs
+          - name: namespace
+            value: openshift-pipelines
+      runAfter:
+        - unit-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: source
+      params:
+        - name: IMAGE
+          value: "$(params.image-registry)/$(params.image-namespace)/$(params.app-name):$(params.revision)"
+        - name: TLSVERIFY
+          value: "false"
+
+    # ---------------------------------------------------------
+    # 4. マニフェストリポジトリ取得 
+    # ---------------------------------------------------------
+    - name: fetch-manifest
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: openshift-pipelines
+      runAfter:
+        - build-image
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+          subPath: manifest
+        - name: basic-auth
+          workspace: basic-auth
+      params:
+        - name: URL
+          value: $(params.manifest-repo-url)
+        - name: REVISION
+          value: "main"
+
+    # ---------------------------------------------------------
+    # 5. マニフェストのイメージタグ更新 & git push
+    # ---------------------------------------------------------
+    - name: update-manifest
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-cli
+          - name: namespace
+            value: openshift-pipelines
+      runAfter:
+        - fetch-manifest
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: manifest
+        - name: basic-auth
+          workspace: basic-auth
+      params:
+        - name: DELETE_EXISTING
+          value: "false"
+        - name: GIT_USER_NAME
+          value: "tekton-pipeline"
+        - name: GIT_USER_EMAIL
+          value: "tekton@example.com"
+        - name: GIT_SCRIPT
+          value: |
+            pwd
+            sed -i 's|newTag: ".*" # frontend-image-tag|newTag: "$(params.revision)" # frontend-image-tag|' envs/dev/kustomization.yaml
+            git add -A
+            git diff --cached --quiet && echo "No changes to commit" && exit 0
+            git commit -m "[CI] Update frontend image to $(params.revision)"
+            git push origin HEAD:main

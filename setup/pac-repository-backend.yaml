@@ -1,0 +1,12 @@
+apiVersion: pipelinesascode.tekton.dev/v1alpha1
+kind: Repository
+metadata:
+  name: dev-handson-backend
+  namespace: dev-handson
+spec:
+  url: "https://github.com/mosuke5/openshift-pipelines-gitops-practice-v2-backend.git"
+  #git_provider:
+  #  secret:
+  #    name: dev-handson-pac-token
+  #    key:
+  #      token: token

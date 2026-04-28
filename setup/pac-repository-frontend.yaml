@@ -1,0 +1,12 @@
+apiVersion: pipelinesascode.tekton.dev/v1alpha1
+kind: Repository
+metadata:
+  name: dev-handson-frontend
+  namespace: dev-handson
+spec:
+  url: "https://github.com/YOUR_ORG/frontend-app"
+  git_provider:
+    secret:
+      name: dev-handson-pac-token
+      key:
+        token: token
