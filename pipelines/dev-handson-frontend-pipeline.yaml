@@ -74,7 +74,7 @@ spec:
               npm run test:unit
 
     # ---------------------------------------------------------
-    # 3. コンテナイメージビルド (Buildah)
+    # 3. コンテナイメージビルド (S2I Node.js)
     # ---------------------------------------------------------
     - name: build-image
       taskRef:
@@ -83,7 +83,7 @@ spec:
           - name: kind
             value: task
           - name: name
-            value: buildah
+            value: s2i-nodejs
           - name: namespace
             value: openshift-pipelines
       runAfter:
@@ -95,10 +95,8 @@ spec:
       params:
         - name: IMAGE
           value: "$(params.image-registry)/$(params.image-namespace)/$(params.app-name):$(params.revision)"
-        - name: DOCKERFILE
-          value: ./Dockerfile
-        - name: TLS_VERIFY
-          value: "false"
+        - name: VERSION
+          value: "22-ubi9"
 
     # ---------------------------------------------------------
     # 4. マニフェストリポジトリ取得 
